@@ -68,7 +68,12 @@ class AbLangPairedConfig(PretrainedConfig):
 
 class AbLangPaired(PreTrainedModel):
 
-    def __init__(self, personal_config: AbLangPairedConfig, device: T.Union[str, torch.device] = "cpu"):
+    def __init__(self, personal_config: AbLangPairedConfig, device: T.Union[str, torch.device] = "cpu", use_pretrained: bool = False):
+        """
+        The Pre-trained AbLang Model from Olsen et. al except concatenated mean-pooled embeddings from the heavy and light chains.
+        The intended use is to have the "use_pretrained" flag set to False and then to provide fine-tuned model weights (e.g. AbLangPDB)
+        but for comparison purposes you may want to set "use_pretrained" to True to exclude all fine-tuning.
+        """
         # During training I used the AbLang_heavy config as AbLangPaired's config
         # This may be why it is very hard to integrate this into the Hugging Face AutoModel system
         self.config = AutoConfig.from_pretrained(personal_config.heavy_model_id, revision=personal_config.heavy_revision)
@@ -86,16 +91,18 @@ class AbLangPaired(PreTrainedModel):
             revision=personal_config.light_revision,  # Specific commit hash
             trust_remote_code=True
         )
+        self.use_pretrained = use_pretrained
         
-        self.mixer = Mixer(in_d=1536)
+        if not use_pretrained:
+            self.mixer = Mixer(in_d=1536)
 
-        # Load either torch or transformers saved file
-        if personal_config.checkpoint_filename.endswith('.safetensors'):
-            state_dict = load_file(personal_config.checkpoint_filename)
-        else:
-            state_dict = torch.load(personal_config.checkpoint_filename, map_location=device)
-        
-        load_result = self.load_state_dict(state_dict, strict=False)
+            # Load either torch or transformers saved file
+            if personal_config.checkpoint_filename.endswith('.safetensors'):
+                state_dict = load_file(personal_config.checkpoint_filename)
+            else:
+                state_dict = torch.load(personal_config.checkpoint_filename, map_location=device)
+            
+            load_result = self.load_state_dict(state_dict, strict=False)
         self.to(device)
         self.eval()
 
@@ -110,6 +117,7 @@ class AbLangPaired(PreTrainedModel):
 
         # Concatenate and then do 6 fully connected layers to pick up on cross-chain features
         pooled_output = torch.cat([pooled_output_h, pooled_output_l], dim=1)
-        pooled_output = self.mixer(pooled_output)
+        if not self.use_pretrained:
+            pooled_output = self.mixer(pooled_output)
         embedding = F.normalize(pooled_output, p=2, dim=1)
         return embedding

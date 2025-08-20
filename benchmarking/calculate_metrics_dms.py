@@ -110,9 +110,21 @@ def calculate_pw_avg_prec(y_scores: np.ndarray, y_true_binary: np.ndarray) -> T.
     
     return avg_prec, precision, recall, no_skill_baseline
 
-def get_metrics_dms(df_path: str, labels_file_val: str, labels_file_test: str, score_type: str, model_name: str, output_folder: str, dataset1: str = "TRAIN", dataset2_val: str = "VAL", dataset2_test: str = "TEST"):
+def get_metrics_dms(df_path: str, labels_file_val: str, labels_file_test: str, score_type: str, model_name: str, output_folder: str, dataset1: str = "TRAIN", dataset2_val: str = "VAL", dataset2_test: str = "TEST", epitope_threshold: float = None):
     """
     Main function to run the full analysis pipeline for DMS dataset with binary epitope labels.
+    
+    Args:
+        df_path (str): Path to the dataset parquet file
+        labels_file_val (str): Path to validation labels file
+        labels_file_test (str): Path to test labels file
+        score_type (str): Type of scoring ('cosine', 'seq_identity', 'cdrh3_identity')
+        model_name (str): Name of the model for output files
+        output_folder (str): Directory to save results
+        dataset1 (str): Name of first dataset (default: "TRAIN")
+        dataset2_val (str): Name of validation dataset (default: "VAL")
+        dataset2_test (str): Name of test dataset (default: "TEST")
+        epitope_threshold (float, optional): Pre-computed optimal threshold. If None, will compute from validation data.
     """
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
@@ -120,11 +132,14 @@ def get_metrics_dms(df_path: str, labels_file_val: str, labels_file_test: str, s
     df = pd.read_parquet(df_path)
 
     # --- Find Optimal Threshold using VAL data ---
-    print("\n--- Finding optimal F1 threshold using VAL data ---")
-    y_scores_val, y_true_binary_val = prep_data_dms(df, score_type, dataset1, dataset2_val, labels_file_val)
-    
-    optimal_threshold = find_optimal_f1_threshold(y_scores_val, y_true_binary_val)
-    print(f"Optimal F1 Threshold for Epitope matching: {optimal_threshold:.4f}")
+    if epitope_threshold is None:
+        print("\n--- Finding optimal F1 threshold using VAL data ---")
+        y_scores_val, y_true_binary_val = prep_data_dms(df, score_type, dataset1, dataset2_val, labels_file_val)
+        optimal_threshold = find_optimal_f1_threshold(y_scores_val, y_true_binary_val)
+        print(f"Optimal F1 Threshold for Epitope matching: {optimal_threshold:.4f}")
+    else:
+        optimal_threshold = epitope_threshold
+        print(f"\n--- Using provided F1 threshold: {optimal_threshold:.4f} ---")
 
     # --- Epitope Analysis on TEST data ---
     # Prepare test data for final evaluation
@@ -147,7 +162,19 @@ def get_metrics_dms(df_path: str, labels_file_val: str, labels_file_test: str, s
     roc_results.to_csv(f'{output_folder}/{model_name}_dms_roc_epitope.csv', index=False)
     pr_results.to_csv(f'{output_folder}/{model_name}_dms_pr_epitope.csv', index=False)
     
+    # --- Save Summary Metrics ---
+    summary_filename = f'{output_folder}/{model_name}_dms_summarymetrics.txt'
+    with open(summary_filename, 'w') as f:
+        f.write(f"Model: {model_name}\n")
+        f.write(f"Dataset: dms\n")
+        f.write(f"Score_Type: {score_type}\n")
+        f.write(f"ROC_AUC: {auc:.6f}\n")
+        f.write(f"Average_Precision: {ap:.6f}\n")
+        f.write(f"F1_Score: {f1:.6f}\n")
+        f.write(f"Threshold: {optimal_threshold:.6f}\n")
+    
     print(f"\nResults saved to {output_folder}")
+    print(f"Summary metrics saved to {summary_filename}")
 
 
 if __name__ == '__main__':
