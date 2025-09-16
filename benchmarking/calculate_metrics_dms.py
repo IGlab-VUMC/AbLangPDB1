@@ -69,7 +69,7 @@ def prep_data_dms_from_precomputed_matrix(matrix_file: str, labels_file: str, us
     
     return y_scores, y_true_binary
 
-def prep_data_dms(df: pd.DataFrame, score_type: str, dataset1: str, dataset2: str, labels_file: str, use_square_matrices: bool = False) -> T.Tuple[np.ndarray, np.ndarray]:
+def prep_data_dms(df: pd.DataFrame, score_type: str, dataset1: str, dataset2: str, labels_file: str, use_square_matrices: bool = False, embedding_column: str = "EMBEDDING") -> T.Tuple[np.ndarray, np.ndarray]:
     """
     Prepares data by calculating pairwise scores and aligning them with binary epitope labels for DMS dataset.
 
@@ -92,8 +92,8 @@ def prep_data_dms(df: pd.DataFrame, score_type: str, dataset1: str, dataset2: st
     set2_abs = df[df["DATASET"] == dataset2].copy()
 
     if score_type == 'cosine':
-        embeds1 = torch.Tensor(set1_abs["EMBEDDING"].to_list())
-        embeds2 = torch.Tensor(set2_abs["EMBEDDING"].to_list())
+        embeds1 = torch.Tensor(set1_abs[embedding_column].to_list())
+        embeds2 = torch.Tensor(set2_abs[embedding_column].to_list())
         score_matrix = embeds1 @ embeds2.t()
     elif score_type == 'seq_identity':
         set1_abs["HCLC"] = set1_abs.apply(lambda row: (row["HC_AA"], row["LC_AA"]), axis=1)
@@ -149,7 +149,7 @@ def calculate_pw_avg_prec(y_scores: np.ndarray, y_true_binary: np.ndarray) -> T.
     
     return avg_prec, precision, recall, no_skill_baseline
 
-def get_metrics_dms(df_path: str, labels_file_val: str, labels_file_test: str, score_type: str, model_name: str, output_folder: str, dataset1: str = "TRAIN", dataset2_val: str = "VAL", dataset2_test: str = "TEST", epitope_threshold: float = None, matrix_file_val: str = None, matrix_file_test: str = None, use_square_matrices: bool = False):
+def get_metrics_dms(df_path: str, labels_file_val: str, labels_file_test: str, score_type: str, model_name: str, output_folder: str, dataset1: str = "TRAIN", dataset2_val: str = "VAL", dataset2_test: str = "TEST", epitope_threshold: float = None, matrix_file_val: str = None, matrix_file_test: str = None, use_square_matrices: bool = False, embedding_column: str = "EMBEDDING"):
     """
     Main function to run the full analysis pipeline for DMS dataset with binary epitope labels.
     
@@ -180,7 +180,7 @@ def get_metrics_dms(df_path: str, labels_file_val: str, labels_file_test: str, s
                 raise ValueError("matrix_file_val is required for abodybuilder2_dtw_cdrs score_type")
             y_scores_val, y_true_binary_val = prep_data_dms_from_precomputed_matrix(matrix_file_val, labels_file_val, use_square_matrices)
         else:
-            y_scores_val, y_true_binary_val = prep_data_dms(df, score_type, dataset1, dataset2_val, labels_file_val, use_square_matrices)
+            y_scores_val, y_true_binary_val = prep_data_dms(df, score_type, dataset1, dataset2_val, labels_file_val, use_square_matrices, embedding_column)
         optimal_threshold = find_optimal_f1_threshold(y_scores_val, y_true_binary_val)
         print(f"Optimal F1 Threshold for Epitope matching: {optimal_threshold:.4f}")
     else:
@@ -196,7 +196,7 @@ def get_metrics_dms(df_path: str, labels_file_val: str, labels_file_test: str, s
     else:
         # For test vs test mode, use TEST vs TEST for final evaluation
         final_dataset1 = dataset2_test if use_square_matrices and dataset1 == dataset2_val else dataset1
-        y_scores_test, y_true_binary_test = prep_data_dms(df, score_type, final_dataset1, dataset2_test, labels_file_test, use_square_matrices)
+        y_scores_test, y_true_binary_test = prep_data_dms(df, score_type, final_dataset1, dataset2_test, labels_file_test, use_square_matrices, embedding_column)
 
     print(f"\n--- Analyzing Epitope-level performance on {dataset2_test} data (Binary epitope matching) ---")
     auc, fpr, tpr = calculate_roc_auc(y_scores_test, y_true_binary_test)

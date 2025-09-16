@@ -31,8 +31,15 @@ def main():
     model_path = "ablangpdb_model.safetensors"
     if not os.path.exists(model_path):
         print(f"❌ Model weights not found: {model_path}")
-        print("\n📥 Please download the model weights first:")
-        print('curl -L "https://huggingface.co/clint-holt/AbLangPDB1/resolve/main/ablangpdb_model.safetensors?download=true" -o ablangpdb_model.safetensors')
+        print("\n📥 Download the model weights from HuggingFace:")
+        print("🤗 HuggingFace Page: https://huggingface.co/clint-holt/AbLangPDB1")
+        print("\n📋 Download options:")
+        print("Option 1 (curl):")
+        print('  curl -L "https://huggingface.co/clint-holt/AbLangPDB1/resolve/main/ablangpdb_model.safetensors?download=true" -o ablangpdb_model.safetensors')
+        print("\nOption 2 (huggingface_hub):")
+        print("  pip install huggingface_hub")
+        print("  python -c \"from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='clint-holt/AbLangPDB1', filename='ablangpdb_model.safetensors', local_dir='.')\"")
+        print("\n💡 Model size: 738MB - Please ensure you have sufficient disk space and internet bandwidth.")
         sys.exit(1)
     
     print(f"✅ Found model weights: {model_path}")

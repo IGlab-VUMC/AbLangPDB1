@@ -32,20 +32,37 @@ The model processes heavy and light chains independently using pre-trained [AbLa
 
 ## 🚀 Quick Start
 
-**Get embeddings for your antibodies in 3 simple steps:**
+### 📥 Model Download
+
+**AbLangPDB1 is hosted on HuggingFace for optimal download experience:**
+
+🤗 **[Download from HuggingFace Hub](https://huggingface.co/clint-holt/AbLangPDB1)**
 
 ```bash
-# 1. Install dependencies
+# Option 1: Direct download (recommended)
+curl -L "https://huggingface.co/clint-holt/AbLangPDB1/resolve/main/ablangpdb_model.safetensors?download=true" -o ablangpdb_model.safetensors
+
+# Option 2: Using huggingface_hub
+pip install huggingface_hub
+python -c "from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='clint-holt/AbLangPDB1', filename='ablangpdb_model.safetensors', local_dir='.')"
+```
+
+### ⚡ Get Started in 3 Steps
+
+```bash
+# 1. Clone repository and install dependencies
+git clone https://github.com/your-username/AbLangPDB1.git
+cd AbLangPDB1
 pip install torch pandas transformers safetensors
 
-# 2. Download model
+# 2. Download model weights (738MB)
 curl -L "https://huggingface.co/clint-holt/AbLangPDB1/resolve/main/ablangpdb_model.safetensors?download=true" -o ablangpdb_model.safetensors
 
 # 3. Run inference
 python quick_start_example.py
 ```
 
-**Or use the interactive notebook:** [`pdb_inference_examples.ipynb`](pdb_inference_examples.ipynb)
+**💡 Explore examples:** [`pdb_inference_examples.ipynb`](pdb_inference_examples.ipynb) | **🔬 Run benchmarks:** [`benchmarking/`](benchmarking/)
 
 ### ⚡ 30-Second Example
 

@@ -17,7 +17,12 @@ The benchmarking suite evaluates models on two key datasets:
 ```bash
 # Install required packages
 pip install torch pandas transformers safetensors scikit-learn matplotlib seaborn openpyxl
+
+# Download AbLangPDB1 model weights from HuggingFace (required for benchmarking)
+curl -L "https://huggingface.co/clint-holt/AbLangPDB1/resolve/main/ablangpdb_model.safetensors?download=true" -o ../ablangpdb_model.safetensors
 ```
+
+**📥 Model Download:** AbLangPDB1 model weights are hosted on [HuggingFace](https://huggingface.co/clint-holt/AbLangPDB1) and must be downloaded separately from the code repository.
 
 ### Dataset Files
 
