@@ -36,17 +36,57 @@ def get_seq_id_matrix_cdrh3(query: str, train_db: pd.DataFrame) -> np.ndarray:
 
 # --- Core Analysis Functions ---
 
-def prep_data(df: pd.DataFrame, score_type: str, dataset1: str, dataset2: str, labels_file: str) -> T.Tuple[np.ndarray, np.ndarray]:
+def prep_data_from_precomputed_matrix(matrix_file: str, labels_file: str, use_square_matrices: bool = False) -> T.Tuple[np.ndarray, np.ndarray]:
+    """
+    Prepares data from pre-computed similarity matrices (like ABodyBuilder2 DTW CDR similarities).
+    
+    Args:
+        matrix_file (str): Path to the numpy file containing pre-computed similarity matrix.
+        labels_file (str): Path to the torch tensor file with pre-computed labels.
+        use_square_matrices (bool): If True, applies lower triangle mask for square matrices (excludes diagonal).
+        
+    Returns:
+        A tuple containing:
+            - y_scores (np.ndarray): A 1D array of prediction scores for each pair.
+            - y_true_continuous (np.ndarray): A 1D array of the corresponding continuous ground truth labels.
+    """
+    print(f"Loading pre-computed similarity matrix from: {matrix_file}")
+    
+    # Load the pre-computed similarity matrix
+    score_matrix = torch.from_numpy(np.load(matrix_file)).float()
+    
+    # Load true labels and create a mask to filter out irrelevant pairs
+    true_labels_matrix = torch.load(labels_file)
+    nonexistent_pairs = torch.where((-.1 < true_labels_matrix) & (true_labels_matrix < 0.1))
+    to_use_mask = torch.ones_like(score_matrix, dtype=torch.bool)
+    to_use_mask[nonexistent_pairs[0], nonexistent_pairs[1]] = False
+    
+    # For square matrices, apply lower triangle mask (excludes diagonal)
+    if use_square_matrices and score_matrix.shape[0] == score_matrix.shape[1]:
+        # Create lower triangle mask (excluding diagonal) 
+        lower_triangle_mask = torch.tril(torch.ones_like(score_matrix, dtype=torch.bool), diagonal=-1)
+        to_use_mask = to_use_mask & lower_triangle_mask
+        print(f"  🔄 Square matrix mode: Using lower triangle (excluding diagonal)")
+        print(f"  📊 Matrix shape: {score_matrix.shape}, Using {to_use_mask.sum()} pairs (lower triangle)")
+    
+    # Flatten and apply the mask
+    y_scores = score_matrix[to_use_mask].numpy()
+    y_true_continuous = true_labels_matrix[to_use_mask].numpy()
+    
+    return y_scores, y_true_continuous
+
+def prep_data(df: pd.DataFrame, score_type: str, dataset1: str, dataset2: str, labels_file: str, use_square_matrices: bool = False) -> T.Tuple[np.ndarray, np.ndarray]:
     """
     Prepares data by calculating pairwise scores and aligning them with true labels.
 
     Args:
         df (pd.DataFrame): DataFrame with antibody sequences and/or embeddings.
         score_type (str): The method for scoring pairs. 
-                          Options: 'cosine', 'seq_identity', 'cdrh3_identity'.
+                          Options: 'cosine', 'seq_identity', 'cdrh3_identity', 'abodybuilder2_dtw_cdrs'.
         dataset1 (str): Name of the first dataset subset (e.g., "TRAIN").
         dataset2 (str): Name of the second dataset subset (e.g., "VAL").
         labels_file (str): Path to the torch tensor file with pre-computed labels.
+        use_square_matrices (bool): If True, applies lower triangle mask for square matrices (excludes diagonal).
 
     Returns:
         A tuple containing:
@@ -54,6 +94,8 @@ def prep_data(df: pd.DataFrame, score_type: str, dataset1: str, dataset2: str, l
             - y_true_continuous (np.ndarray): A 1D array of the corresponding continuous ground truth labels.
     """
     print(f"Preparing data with score_type: '{score_type}' for {dataset1} vs {dataset2}...")
+    if use_square_matrices and dataset1 == dataset2:
+        print(f"  🔄 Square matrix mode: Using lower triangle (excluding diagonal)")
     
     set1_abs = df[df["DATASET"] == dataset1].copy()
     set2_abs = df[df["DATASET"] == dataset2].copy()
@@ -77,6 +119,13 @@ def prep_data(df: pd.DataFrame, score_type: str, dataset1: str, dataset2: str, l
     nonexistent_pairs = torch.where((-.1 < true_labels_matrix) & (true_labels_matrix < 0.1))
     to_use_mask = torch.ones_like(score_matrix, dtype=torch.bool)
     to_use_mask[nonexistent_pairs[0], nonexistent_pairs[1]] = False
+    
+    # For square matrices, apply lower triangle mask (excludes diagonal)
+    if use_square_matrices and dataset1 == dataset2:
+        # Create lower triangle mask (excluding diagonal) 
+        lower_triangle_mask = torch.tril(torch.ones_like(score_matrix, dtype=torch.bool), diagonal=-1)
+        to_use_mask = to_use_mask & lower_triangle_mask
+        print(f"  📊 Matrix shape: {score_matrix.shape}, Using {to_use_mask.sum()} pairs (lower triangle)")
     
     # Flatten and apply the mask
     y_scores = score_matrix[to_use_mask].numpy()
@@ -117,7 +166,7 @@ def calculate_pw_avg_prec(y_scores: np.ndarray, y_true_continuous: np.ndarray, p
     
     return avg_prec, precision, recall, no_skill_baseline
 
-def get_metrics(df_path: str, labels_file_val: str, labels_file_test: str, score_type: str, model_name: str, output_folder: str, dataset1: str = "TRAIN", dataset2_val: str = "VAL", dataset2_test: str = "TEST", epitope_threshold: float = None, antigen_threshold: float = None):
+def get_metrics(df_path: str, labels_file_val: str, labels_file_test: str, score_type: str, model_name: str, output_folder: str, dataset1: str = "TRAIN", dataset2_val: str = "VAL", dataset2_test: str = "TEST", epitope_threshold: float = None, antigen_threshold: float = None, matrix_file_val: str = None, matrix_file_test: str = None, use_square_matrices: bool = False):
     """
     Main function to run the full analysis pipeline for a given scoring method.
     
@@ -125,7 +174,7 @@ def get_metrics(df_path: str, labels_file_val: str, labels_file_test: str, score
         df_path (str): Path to the dataset parquet file
         labels_file_val (str): Path to validation labels file
         labels_file_test (str): Path to test labels file
-        score_type (str): Type of scoring ('cosine', 'seq_identity', 'cdrh3_identity')
+        score_type (str): Type of scoring ('cosine', 'seq_identity', 'cdrh3_identity', 'abodybuilder2_dtw_cdrs')
         model_name (str): Name of the model for output files
         output_folder (str): Directory to save results
         dataset1 (str): Name of first dataset (default: "TRAIN")
@@ -133,6 +182,8 @@ def get_metrics(df_path: str, labels_file_val: str, labels_file_test: str, score
         dataset2_test (str): Name of test dataset (default: "TEST")
         epitope_threshold (float, optional): Pre-computed optimal threshold for epitope classification. If None, will compute from validation data.
         antigen_threshold (float, optional): Pre-computed optimal threshold for antigen classification. If None, will compute from validation data.
+        matrix_file_val (str, optional): Path to pre-computed similarity matrix for validation (required for 'abodybuilder2_dtw_cdrs')
+        matrix_file_test (str, optional): Path to pre-computed similarity matrix for test (required for 'abodybuilder2_dtw_cdrs')
     """
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
@@ -142,7 +193,12 @@ def get_metrics(df_path: str, labels_file_val: str, labels_file_test: str, score
     # --- Find Optimal Thresholds using VAL data ---
     if epitope_threshold is None or antigen_threshold is None:
         print("\n--- Finding optimal F1 thresholds using VAL data ---")
-        y_scores_val, y_true_continuous_val = prep_data(df, score_type, dataset1, dataset2_val, labels_file_val)
+        if score_type == 'abodybuilder2_dtw_cdrs':
+            if matrix_file_val is None:
+                raise ValueError("matrix_file_val is required for abodybuilder2_dtw_cdrs score_type")
+            y_scores_val, y_true_continuous_val = prep_data_from_precomputed_matrix(matrix_file_val, labels_file_val, use_square_matrices)
+        else:
+            y_scores_val, y_true_continuous_val = prep_data(df, score_type, dataset1, dataset2_val, labels_file_val, use_square_matrices)
     
     # Threshold for Epitope
     if epitope_threshold is None:
@@ -164,7 +220,14 @@ def get_metrics(df_path: str, labels_file_val: str, labels_file_test: str, score
 
     # --- Epitope Analysis (>= 0.5) on TEST data ---
     # Prepare test data for final evaluation
-    y_scores_test, y_true_continuous_test = prep_data(df, score_type, dataset1, dataset2_test, labels_file_test)
+    if score_type == 'abodybuilder2_dtw_cdrs':
+        if matrix_file_test is None:
+            raise ValueError("matrix_file_test is required for abodybuilder2_dtw_cdrs score_type")
+        y_scores_test, y_true_continuous_test = prep_data_from_precomputed_matrix(matrix_file_test, labels_file_test, use_square_matrices)
+    else:
+        # For test vs test mode, use TEST vs TEST for final evaluation
+        final_dataset1 = dataset2_test if use_square_matrices and dataset1 == dataset2_val else dataset1
+        y_scores_test, y_true_continuous_test = prep_data(df, score_type, final_dataset1, dataset2_test, labels_file_test, use_square_matrices)
 
     print(f"\n--- Analyzing Epitope-level performance on {dataset2_test} data (Positive label >= 0.5) ---")
     auc_ep, fpr_ep, tpr_ep = calculate_roc_auc(y_scores_test, y_true_continuous_test, 0.5)

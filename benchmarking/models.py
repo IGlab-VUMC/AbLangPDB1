@@ -12,15 +12,22 @@ from typing import List, Dict, Tuple
 
 # Data processing imports
 import pandas as pd
+import numpy as np
 from tqdm import tqdm
+
+import ablang
+import ablang2
+from antiberty import AntiBERTyRunner
 
 # PyTorch imports
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 from torch.nn.utils.rnn import pad_sequence
 
 # Hugging Face Transformers imports
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AutoModel, RobertaModel, RobertaTokenizer, BertTokenizer, BertModel
+
 
 # Local import
 module_path = os.path.abspath(os.path.join('..'))
@@ -210,7 +217,7 @@ def fix_unknown_tokens(input_ids: torch.Tensor, attention_mask: torch.Tensor) ->
     return input_ids, attention_mask
 
 
-def embed_dataloader(dataloader: DataLoader, model, device) -> torch.Tensor:
+def embed_dataloader(dataloader: DataLoader, model, device) -> List[np.ndarray]:
     """
     Enhanced embedding function that works with the new tokenization system.
     
@@ -220,18 +227,15 @@ def embed_dataloader(dataloader: DataLoader, model, device) -> torch.Tensor:
         device: Device to run inference on (CPU or GPU)
         
     Returns:
-        Tensor containing embeddings for all antibodies
+        List of numpy arrays containing embeddings for all antibodies (pandas DataFrame compatible)
     """
     model.to(device)
     model.eval()
     
-    # Preallocate tensor for all embeddings  
-    num_embeddings = len(dataloader.dataset)
-    embedding_dim = 1536
-    all_embeds = torch.zeros((num_embeddings, embedding_dim), dtype=torch.float32)
+    # Store embeddings as list of numpy arrays
+    all_embeddings = []
     
     # Generate embeddings batch by batch
-    current_batch_index = 0
     print("Now Embedding Antibodies with Enhanced Method")
     
     with torch.no_grad():
@@ -254,16 +258,257 @@ def embed_dataloader(dataloader: DataLoader, model, device) -> torch.Tensor:
                 l_attention_mask=l_attention_mask
             )
             
-            # Store embeddings in preallocated tensor
-            batch_size = embeds.size(0)
-            all_embeds[current_batch_index:current_batch_index + batch_size] = embeds.detach().cpu()
-            current_batch_index += batch_size
+            # Convert batch embeddings to individual numpy arrays
+            batch_numpy = embeds.detach().cpu().numpy()
+            for embedding in batch_numpy:
+                all_embeddings.append(embedding)
             
             # Clean up GPU memory
             del h_input_ids, h_attention_mask, l_input_ids, l_attention_mask, embeds
             torch.cuda.empty_cache()
     
-    return all_embeds
+    return all_embeddings
+
+
+class BalmEmbedder:
+    """
+    Embeds antibody sequences using the BALM model.
+    """
+    def __init__(self, model_directory, device="cpu", batch_size=128):
+        self.model_directory = model_directory
+        self.device = torch.device(device if torch.cuda.is_available() else "cpu")
+        self.batch_size = batch_size
+        self.tokenizer = RobertaTokenizer.from_pretrained(model_directory)
+        self.model = RobertaModel.from_pretrained(model_directory).to(self.device)
+        self.model.eval()
+
+    def embed(self, df):
+        sequences = [f"{hc}</s>{lc}" for hc, lc in zip(df["HC_AA"], df["LC_AA"])]
+        
+        encoded_input = self.tokenizer(
+            sequences,
+            padding="max_length",
+            truncation=True,
+            max_length=512,
+            return_tensors='pt'
+        )
+
+        dataset = torch.utils.data.TensorDataset(
+            encoded_input['input_ids'],
+            encoded_input['attention_mask']
+        )
+        dataloader = torch.utils.data.DataLoader(dataset, batch_size=self.batch_size)
+
+        all_embeddings = []
+        with torch.no_grad():
+            for batch in tqdm(dataloader):
+                input_ids, attention_mask = batch
+                input_ids, attention_mask = input_ids.to(self.device), attention_mask.to(self.device)
+                
+                outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
+                
+                # Masked Mean Pooling
+                last_hidden = outputs.last_hidden_state
+                attention_mask_expanded = attention_mask.unsqueeze(-1).expand(last_hidden.size()).float()
+                sum_embeddings = torch.sum(last_hidden * attention_mask_expanded, 1)
+                sum_mask = torch.clamp(attention_mask_expanded.sum(1), min=1e-9)
+                batch_embeddings = sum_embeddings / sum_mask
+                
+                # L2 Normalization
+                normalized_embeddings = F.normalize(batch_embeddings, p=2, dim=1)
+                all_embeddings.append(normalized_embeddings.cpu().numpy())
+
+        # Return list of numpy arrays for pandas DataFrame compatibility
+        embeddings_array = np.vstack(all_embeddings)
+        return [embedding for embedding in embeddings_array]
+
+class Ablang2Embedder:
+    """
+    Embeds antibody sequences using the AbLang2 model.
+    """
+    def __init__(self, device="cpu", batch_size=256):
+        self.device = torch.device(device if torch.cuda.is_available() else "cpu")
+        self.batch_size = batch_size
+        self.model = ablang2.pretrained(model_to_use='ablang2-paired', device=self.device)
+        # self.model.eval()
+
+    def embed(self, df):
+        sequences = [[hc, lc] for hc, lc in zip(df["HC_AA"].apply(lambda aa: aa[:157]), df["LC_AA"])]
+        
+        all_embeddings = []
+        with torch.no_grad():
+            for i in tqdm(range(0, len(sequences), self.batch_size)):
+                batch_sequences = sequences[i:i+self.batch_size]
+                batch_embeddings = self.model(batch_sequences, mode='seqcoding')
+                
+                # Convert to tensor and normalize
+                batch_tensor = torch.from_numpy(batch_embeddings)
+                normalized_batch = F.normalize(batch_tensor, p=2, dim=1)
+                all_embeddings.append(normalized_batch.numpy())
+        
+        # Return list of numpy arrays for pandas DataFrame compatibility
+        return [embedding for embedding in np.vstack(all_embeddings)]
+
+
+class Esm2Embedder:
+    """
+    Embeds antibody sequences using the ESM-2 model.
+    """
+    def __init__(self, model_name="facebook/esm2_t33_650M_UR50D", device="cpu", batch_size=128):
+        self.device = torch.device(device if torch.cuda.is_available() else "cpu")
+        self.batch_size = batch_size
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.model = AutoModel.from_pretrained(model_name).to(self.device)
+        self.model.eval()
+
+    def embed(self, df):
+        # Using two CLS tokens between chains as requested
+        sequences = [f"{hc}{self.tokenizer.cls_token}{self.tokenizer.cls_token}{lc}" for hc, lc in zip(df["HC_AA"], df["LC_AA"])]
+        
+        all_embeddings = []
+        for i in tqdm(range(0, len(sequences), self.batch_size)):
+            batch_sequences = sequences[i:i+self.batch_size]
+            encoded_input = self.tokenizer(
+                batch_sequences,
+                padding=True,
+                truncation=True,
+                return_tensors='pt'
+            ).to(self.device)
+
+            with torch.no_grad():
+                outputs = self.model(**encoded_input)
+                
+                # Masked Mean Pooling
+                last_hidden = outputs.last_hidden_state
+                attention_mask = encoded_input['attention_mask']
+                attention_mask_expanded = attention_mask.unsqueeze(-1).expand(last_hidden.size()).float()
+                sum_embeddings = torch.sum(last_hidden * attention_mask_expanded, 1)
+                sum_mask = torch.clamp(attention_mask_expanded.sum(1), min=1e-9)
+                batch_embeddings = sum_embeddings / sum_mask
+
+                # L2 Normalization
+                normalized_embeddings = F.normalize(batch_embeddings, p=2, dim=1)
+                all_embeddings.append(normalized_embeddings.cpu().numpy())
+        
+        # Return list of numpy arrays for pandas DataFrame compatibility
+        embeddings_array = np.vstack(all_embeddings)
+        return [embedding for embedding in embeddings_array]
+
+
+class AntibertyEmbedder:
+    """
+    Embeds antibody heavy chain sequences using the AntiBERTy model.
+    """
+    def __init__(self, batch_size=256):
+        self.runner = AntiBERTyRunner()
+        self.batch_size = batch_size
+
+    def embed(self, df):
+        sequences = df["HC_AA"].tolist()
+        
+        all_embeddings = []
+        # Process in batches for efficiency
+        for i in tqdm(range(0, len(sequences), self.batch_size)):
+            batch_sequences = sequences[i:i+self.batch_size]
+            embeddings_list = self.runner.embed(batch_sequences)
+            
+            # Convert list of tensors to numpy arrays and perform mean pooling
+            batch_embeddings = []
+            for tensor in embeddings_list:
+                # The output of AntiBERTyRunner already accounts for padding.
+                mean_embedding = tensor.mean(dim=0).cpu().numpy()
+                batch_embeddings.append(mean_embedding)
+            
+            # L2 Normalization for the batch
+            batch_array = np.array(batch_embeddings)
+            batch_tensor = torch.from_numpy(batch_array)
+            normalized_batch = F.normalize(batch_tensor, p=2, dim=1)
+            all_embeddings.append(normalized_batch.numpy())
+        
+        # Return list of numpy arrays for pandas DataFrame compatibility
+        embeddings_array = np.vstack(all_embeddings)
+        return [embedding for embedding in embeddings_array]
+
+
+class AblangHeavyEmbedder:
+    """
+    Embeds antibody heavy chain sequences using the AbLang-Heavy model.
+    """
+    def __init__(self, device="cpu", batch_size=256):
+        self.device = device
+        self.model = ablang.pretrained("heavy", device=self.device)
+        self.batch_size = batch_size
+        self.model.freeze()
+
+    def embed(self, df: pd.DataFrame):
+        sequences = df["HC_AA"].apply(lambda aa: aa[:157]).tolist()
+        all_embeddings = []
+        
+        with torch.no_grad():
+            for i in tqdm(range(0, len(sequences), self.batch_size)):
+                batch_sequences = sequences[i:i+self.batch_size]
+                batch_embeddings = self.model(batch_sequences, mode='seqcoding')
+                
+                # Convert to tensor and normalize
+                batch_tensor = torch.from_numpy(batch_embeddings)
+                normalized_batch = F.normalize(batch_tensor, p=2, dim=1)
+                all_embeddings.append(normalized_batch.numpy())
+
+        # Return list of numpy arrays for pandas DataFrame compatibility
+        embeddings_array = np.vstack(all_embeddings)
+        return [embedding for embedding in embeddings_array]
+
+class IgbertEmbedder:
+    """
+    Embeds antibody sequences using the IgBERT model.
+    """
+    def __init__(self, device="cpu", batch_size=256):
+        self.device = torch.device(device if torch.cuda.is_available() else "cpu")
+        self.batch_size = batch_size
+        self.tokenizer = BertTokenizer.from_pretrained("Exscientia/IgBert", do_lower_case=False)
+        self.model = BertModel.from_pretrained("Exscientia/IgBert").to(self.device)
+        self.model.eval()
+
+    def embed(self, df):
+        # The tokenizer expects space-separated sequences with a [SEP] token
+        sequences = [f"{' '.join(hc)} [SEP] {' '.join(lc)}" for hc, lc in zip(df["HC_AA"], df["LC_AA"])]
+        
+        all_embeddings = []
+        for i in tqdm(range(0, len(sequences), self.batch_size)):
+            batch_sequences = sequences[i:i+self.batch_size]
+            encoded_input = self.tokenizer(
+                batch_sequences,
+                padding=True,
+                truncation=True,
+                return_tensors='pt'
+            ).to(self.device)
+
+            with torch.no_grad():
+                outputs = self.model(**encoded_input)
+                
+                # Masked Mean Pooling (ignoring [CLS], [SEP], and padding)
+                last_hidden = outputs.last_hidden_state
+                attention_mask = encoded_input['attention_mask']
+                
+                # To correctly average, we must exclude special tokens from the attention mask
+                special_tokens_mask = (
+                    (encoded_input['input_ids'] == self.tokenizer.cls_token_id) |
+                    (encoded_input['input_ids'] == self.tokenizer.sep_token_id)
+                )
+                attention_mask[special_tokens_mask] = 0
+                
+                attention_mask_expanded = attention_mask.unsqueeze(-1).expand(last_hidden.size()).float()
+                sum_embeddings = torch.sum(last_hidden * attention_mask_expanded, 1)
+                sum_mask = torch.clamp(attention_mask_expanded.sum(1), min=1e-9)
+                batch_embeddings = sum_embeddings / sum_mask
+
+                # L2 Normalization
+                normalized_embeddings = F.normalize(batch_embeddings, p=2, dim=1)
+                all_embeddings.append(normalized_embeddings.cpu().numpy())
+        
+        # Return list of numpy arrays for pandas DataFrame compatibility
+        embeddings_array = np.vstack(all_embeddings)
+        return [embedding for embedding in embeddings_array]
 
 
 if __name__ == "__main__":
@@ -308,17 +553,23 @@ if __name__ == "__main__":
         tokenized_dataloader = tokenize_data(df, model_config, batch_size=256)
         
         print("🔄 Generating AbLangPre embeddings...")
+        from time import time
+        start_time = time()
         all_embeds = embed_dataloader(tokenized_dataloader, model, device)
-        
-        # Add embeddings to dataframe
-        df['EMBEDDING'] = list(all_embeds.cpu().numpy())
+        end_time = time()
+        print(f"⏱️ Embedding generation took {end_time - start_time:.2f} seconds")
+        # Add time per antibody
+        print(f"⏱️ Time per antibody: {(end_time - start_time) / len(df):.4f} seconds")
+        # Add embeddings to dataframe (embeddings are already in list format)
+        df['EMBEDDING'] = all_embeds
         
         # Save the result
-        print(f"💾 Saving embeddings to {output_file}...")
-        df.to_parquet(output_file)
+        # print(f"💾 Saving embeddings to {output_file}...")
+        # df.to_parquet(output_file)
         
         print(f"✅ Successfully generated AbLangPre embeddings!")
-        print(f"📊 Embedding shape: {all_embeds.shape}")
+        print(f"📊 Number of embeddings: {len(all_embeds)}")
+        print(f"📊 Embedding shape per antibody: {all_embeds[0].shape if all_embeds else 'N/A'}")
         print(f"📁 Saved to: {output_file}")
         
     except Exception as e:
