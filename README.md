@@ -1,6 +1,6 @@
 # AbLangPDB1: Epitope-Aware Antibody Embeddings
 
-🧬 **State-of-the-art antibody embeddings that predict epitope overlap for targeted therapeutic discovery**
+**State-of-the-art antibody embeddings that predict epitope overlap for targeted therapeutic discovery**
 
 [![Paper](https://img.shields.io/badge/Paper-bioRxiv-red)](https://doi.org/10.1101/2025.02.25.640114)
 [![Model](https://img.shields.io/badge/🤗%20HuggingFace-Model-blue)](https://huggingface.co/clint-holt/AbLangPDB1)
@@ -8,7 +8,7 @@
 
 > **AbLangPDB1** generates 1536-dimensional embeddings where antibodies targeting similar epitopes cluster together - enabling rapid epitope classification, antibody search, and therapeutic discovery.
 
-## 🔬 Model Description
+## Model Description
 
 **AbLangPDB1** is designed to predict epitope overlap between antibodies by generating high-quality embeddings that capture epitope-specificity information. The model uses contrastive learning on paired heavy and light chain sequences to learn representations where antibodies targeting similar epitopes cluster together in embedding space.
 
@@ -23,16 +23,16 @@ Light Chain Seq → [AbLang Light] → 768-dim → |
 The model processes heavy and light chains independently using pre-trained [AbLang](https://huggingface.co/qilowoq/AbLang_heavy) models, then fuses their embeddings through a custom Mixer network (6 fully connected layers) to produce a unified 1536-dimensional embedding.
 
 
-## 📊 Training Data
+## Training Data
 
 - **Source**: 1,909 non-redundant human antibodies from [Structural Antibody Database (SAbDab)](https://doi.org/10.1093/nar/gkt1043)
 - **Cutoff Date**: February 19, 2024
 - **Antigen Assignment**: Pfam domain-based categorization using [pfam_scan](https://github.com/aziele/pfam_scan)
 - **Data Splits**: 80% training, 10% validation, 10% test (clone-group aware splitting)
 
-## 🚀 Quick Start
+## Quick Start
 
-### 📥 Model Download
+### Model Download
 
 **AbLangPDB1 is hosted on HuggingFace for optimal download experience:**
 
@@ -47,7 +47,7 @@ pip install huggingface_hub
 python -c "from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='clint-holt/AbLangPDB1', filename='ablangpdb_model.safetensors', local_dir='.')"
 ```
 
-### ⚡ Get Started in 3 Steps
+### Get Started in 3 Steps
 
 ```bash
 # 1. Clone repository and install dependencies
@@ -62,9 +62,9 @@ curl -L "https://huggingface.co/clint-holt/AbLangPDB1/resolve/main/ablangpdb_mod
 python quick_start_example.py
 ```
 
-**💡 Explore examples:** [`pdb_inference_examples.ipynb`](pdb_inference_examples.ipynb) | **🔬 Run benchmarks:** [`benchmarking/`](benchmarking/)
+**Explore examples:** [`pdb_inference_examples.ipynb`](pdb_inference_examples.ipynb) | **🔬 Run benchmarks:** [`benchmarking/`](benchmarking/)
 
-### ⚡ 30-Second Example
+### 30-Second Example
 
 ```python
 import torch
@@ -99,7 +99,7 @@ with torch.no_grad():
 print(f"Generated embedding shape: {embedding.shape}")  # (1, 1536)
 ```
 
-## 📊 Performance Highlights
+## Performance Highlights
 
 | Dataset | Metric | AbLangPDB1 | Best Baseline |
 |---------|--------|------------|---------------|
@@ -110,12 +110,12 @@ print(f"Generated embedding shape: {embedding.shape}")  # (1, 1536)
 
 *Comparison against ESM-2, AbLang, AntiBERTy, and other state-of-the-art models*
 
-## 💡 Use Cases
+## Use Cases
 
-1. **🔍 Epitope Classification**: Compare antibodies with unknown epitopes against reference databases
-2. **🔎 Antibody Search**: Find antibodies with similar epitope specificity in large sequence databases  
-3. **💊 Therapeutic Discovery**: Identify candidate antibodies targeting the same epitope as reference therapeutics
-4. **📊 Antibody Clustering**: Group antibodies by epitope similarity for analysis
+1. **Epitope Classification**: Compare antibodies with unknown epitopes against reference databases
+2. **Antibody Search**: Find antibodies with similar epitope specificity in large sequence databases  
+3. **Therapeutic Discovery**: Identify candidate antibodies targeting the same epitope as reference therapeutics
+4. **Antibody Clustering**: Group antibodies by epitope similarity for analysis
 
 ## 📄 Publication
 
@@ -125,7 +125,7 @@ print(f"Generated embedding shape: {embedding.shape}")  # (1, 1536)
 
 *Vanderbilt Center for Antibody Therapeutics, Vanderbilt University Medical Center*
 
-## 📈 Benchmarking
+## Benchmarking
 
 This repository includes comprehensive benchmarking code to evaluate AbLangPDB1 against other methods:
 
@@ -150,10 +150,10 @@ This repository includes comprehensive benchmarking code to evaluate AbLangPDB1 
 ## ⚠️ Limitations
 
 - **Species**: Optimized for human antibodies; reduced accuracy expected for mouse BCRs
-- **Domain Coverage**: Lower performance for antibodies targeting domains not included in training (non-Pfam domains)
+- **Domain Coverage**: Lower performance for antibodies targeting antigenic protein families not included in training. Performance will be best when comparing new antibodies to antibodies in the training dataset.
 - **Custom Architecture**: Requires the provided `ablangpaired_model.py` implementation (not compatible with standard HuggingFace model loading)
 
-## 🔗 Model Weights & Resources
+## Model Weights & Resources
 
 - **HuggingFace Model**: [clint-holt/AbLangPDB1](https://huggingface.co/clint-holt/AbLangPDB1)
 - **Direct Download**: 
@@ -162,7 +162,7 @@ This repository includes comprehensive benchmarking code to evaluate AbLangPDB1 
   ```
 - **Paper**: [bioRxiv link](https://doi.org/10.1101/2025.02.25.640114)
 
-## 📚 Citation
+## Citation
 
 If you use this model or code in your research, please cite our paper:
 
